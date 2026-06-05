@@ -5,6 +5,7 @@ This folder is the **canonical product and technical overview** for the JMC ERP 
 | Document | Purpose |
 |----------|---------|
 | [Product overview](product-overview.md) | What we are building and for whom |
+| [End-to-end overview](end-to-end-overview.md) | Plain-language system walkthrough from signup to payments |
 | [Technical architecture](technical-architecture.md) | Stack, tenancy, layers, and code layout |
 | [Development conventions](development-conventions.md) | Laravel, Livewire, PHP, and data practices |
 | [MVP scope](mvp-scope.md) | What ships first; what is out of scope |

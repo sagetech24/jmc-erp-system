@@ -20,4 +20,4 @@ JMC ERP is a **multi-tenant SaaS ERP** aimed at organizations that need integrat
 - **Operational truth:** Inventory changes are recorded through **inventory movements**, not ad hoc field updates.
 - **Thin UI, rich domain:** User interfaces (Livewire) stay thin; business rules live in services and domain code.
 
-See [Technical architecture](technical-architecture.md) and [Development conventions](development-conventions.md) for how this maps to implementation. For phased delivery and onboarding (register first, create organization after login), see [Development phases](development-phases.md).
+See [Technical architecture](technical-architecture.md) and [Development conventions](development-conventions.md) for how this maps to implementation. For a full walkthrough of how the modules connect in practice, see [End-to-end overview](end-to-end-overview.md). For phased delivery and onboarding (register first, create organization after login), see [Development phases](development-phases.md).
