@@ -78,6 +78,14 @@ class PurchaseOrder extends Model
     }
 
     /**
+     * @return HasMany<SupplierAdvance, $this>
+     */
+    public function supplierAdvances(): HasMany
+    {
+        return $this->hasMany(SupplierAdvance::class);
+    }
+
+    /**
      * @return BelongsTo<User, $this>
      */
     public function closedByUser(): BelongsTo

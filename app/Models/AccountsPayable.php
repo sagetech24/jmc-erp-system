@@ -85,4 +85,12 @@ class AccountsPayable extends Model
     {
         return $this->hasMany(SupplierPaymentRunItem::class, 'accounts_payable_id');
     }
+
+    /**
+     * @return HasMany<SupplierAdvanceApplication, $this>
+     */
+    public function advanceApplications(): HasMany
+    {
+        return $this->hasMany(SupplierAdvanceApplication::class);
+    }
 }

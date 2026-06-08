@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\SupplierAdvanceStatus;
 use App\Models\PurchaseOrder;
 use App\Models\Tenant;
 use App\Support\TenantMoney;
@@ -22,7 +23,7 @@ class extends Component {
         $tenantId = (int) session('current_tenant_id');
         $this->purchaseOrder = PurchaseOrder::query()
             ->where('tenant_id', $tenantId)
-            ->with(['supplier', 'lines.product', 'rfq'])
+            ->with(['supplier', 'lines.product', 'rfq', 'supplierAdvances'])
             ->findOrFail($id);
 
         Gate::authorize('print', $this->purchaseOrder);
@@ -155,6 +156,36 @@ class extends Component {
                 </tfoot>
             </table>
         </section>
+
+        @php
+            $printedAdvances = $purchaseOrder->supplierAdvances
+                ->where('status', '!=', SupplierAdvanceStatus::Cancelled);
+        @endphp
+        @if ($printedAdvances->isNotEmpty())
+            <section class="border-t border-zinc-200 pt-6 dark:border-zinc-700">
+                <flux:text class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">{{ __('Payment issued') }}</flux:text>
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-start text-xs uppercase tracking-wide text-zinc-500">
+                            <th class="pb-2 pe-4 font-medium">{{ __('Method') }}</th>
+                            <th class="pb-2 pe-4 font-medium">{{ __('Reference') }}</th>
+                            <th class="pb-2 pe-4 text-end font-medium">{{ __('Amount') }}</th>
+                            <th class="pb-2 text-end font-medium">{{ __('Status') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
+                        @foreach ($printedAdvances as $advance)
+                            <tr wire:key="print-adv-{{ $advance->id }}">
+                                <td class="py-2 pe-4">{{ $advance->payment_method->label() }}</td>
+                                <td class="py-2 pe-4 font-mono text-xs">{{ $advance->reference ?: '—' }}</td>
+                                <td class="py-2 pe-4 text-end tabular-nums">{{ TenantMoney::format((float) $advance->amount, null, 2) }}</td>
+                                <td class="py-2 text-end">{{ $advance->status->label() }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </section>
+        @endif
 
         @if ($purchaseOrder->notes)
             <section class="border-t border-zinc-200 pt-6 dark:border-zinc-700">

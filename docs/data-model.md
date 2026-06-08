@@ -64,7 +64,9 @@ On-hand quantity for a product is the **sum** of `inventory_movements.quantity` 
 ### Physical columns (accounting)
 
 - **`accounts_receivable`:** `tenant_id`, `sales_invoice_id` (unique), `customer_id`, `total_amount`, `amount_paid`, `status` (`open`, `partial`, `paid`), `posted_at`. Created when a sales invoice is issued (line totals from invoice lines).
-- **`accounts_payable`:** `tenant_id`, `goods_receipt_id` (unique), `supplier_id`, `total_amount`, `amount_paid`, `status`, `posted_at`. Posted explicitly from a posted goods receipt; amount from receipt lines × PO `unit_cost`.
+- **`accounts_payable`:** `tenant_id`, `goods_receipt_id` (unique), `supplier_id`, `total_amount`, `amount_paid`, `status`, `posted_at`. Posted explicitly from a posted goods receipt; amount from receipt lines × PO `unit_cost`. Cleared **supplier advances** on the same PO auto-apply on posting.
+- **`supplier_advances`:** `tenant_id`, `purchase_order_id`, `supplier_id`, `amount`, `amount_applied`, `payment_method`, `status` (`scheduled`, `cleared`, `cancelled`), `paid_at`, optional PDC cheque fields, optional `reference` / `notes`. Prepayment before goods receipt; PDC starts `scheduled` until cleared.
+- **`supplier_advance_applications`:** links a cleared advance to `accounts_payable` with applied `amount` and `applied_at`.
 - **`supplier_payments` / `customer_payments`:** `tenant_id`, party (`supplier_id` / `customer_id`), `amount`, `paid_at`, optional `reference`, `notes`.
 - **`supplier_payment_allocations` / `customer_payment_allocations`:** link a payment to one payable/receivable with an `amount`; sum of allocations equals the payment `amount`, and cannot exceed the open balance on each open item.
 

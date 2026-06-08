@@ -1,16 +1,22 @@
 <?php
 
-use App\Domains\Procurement\Services\ClosePurchaseOrderService;
+use App\Domains\Accounting\Services\ClearSupplierAdvancePdcService;
+use App\Domains\Accounting\Services\RecordSupplierAdvanceService;
 use App\Domains\Accounting\Services\RecordSupplierPaymentService;
 use App\Domains\Accounting\Support\OpenItemStatusResolver;
+use App\Domains\Procurement\Services\ClosePurchaseOrderService;
+use App\Domains\Procurement\Support\PurchaseOrderTotalCalculator;
 use App\Enums\AccountingOpenItemStatus;
 use App\Enums\PurchaseOrderStatus;
+use App\Enums\SupplierAdvanceStatus;
 use App\Enums\SupplierPaymentMethod;
 use App\Http\Requests\ClosePurchaseOrderRequest;
+use App\Http\Requests\StoreSupplierAdvanceRequest;
 use App\Http\Requests\StoreSupplierPaymentRequest;
 use App\Models\AccountsPayable;
 use App\Models\GoodsReceipt;
 use App\Models\PurchaseOrder;
+use App\Models\SupplierAdvance;
 use App\Models\SupplierPayment;
 use App\Support\TenantMoney;
 use Carbon\Carbon;
@@ -42,18 +48,99 @@ class extends Component {
 
     public string $close_reason = '';
 
+    public string $advance_amount = '';
+
+    public string $advance_payment_method = '';
+
+    public string $advance_paid_at = '';
+
+    public string $advance_reference = '';
+
+    public string $advance_notes = '';
+
+    public string $advance_cheque_number = '';
+
+    public string $advance_cheque_date = '';
+
+    public string $advance_cheque_bank = '';
+
+    public string $advance_cheque_payee = '';
+
     public function mount(int $id): void
     {
         $tenantId = (int) session('current_tenant_id');
-        $this->purchaseOrder = PurchaseOrder::query()
-            ->where('tenant_id', $tenantId)
-            ->with(['supplier', 'lines.product', 'goodsReceipts.lines.purchaseOrderLine.product', 'goodsReceipts.accountsPayable', 'closedByUser'])
-            ->findOrFail($id);
+        $this->purchaseOrder = $this->loadPurchaseOrder($tenantId, $id);
 
         Gate::authorize('view', $this->purchaseOrder);
 
         $this->payment_method = SupplierPaymentMethod::Cash->value;
         $this->paid_at = Carbon::now()->format('Y-m-d\TH:i');
+        $this->advance_payment_method = SupplierPaymentMethod::Cash->value;
+        $this->advance_paid_at = Carbon::now()->format('Y-m-d\TH:i');
+    }
+
+    private function loadPurchaseOrder(int $tenantId, int $id): PurchaseOrder
+    {
+        return PurchaseOrder::query()
+            ->where('tenant_id', $tenantId)
+            ->with([
+                'supplier',
+                'lines.product',
+                'goodsReceipts.lines.purchaseOrderLine.product',
+                'goodsReceipts.accountsPayable',
+                'supplierAdvances.recordedByUser',
+                'supplierAdvances.applications',
+                'closedByUser',
+            ])
+            ->findOrFail($id);
+    }
+
+    private function refreshPurchaseOrder(): void
+    {
+        $this->purchaseOrder = $this->loadPurchaseOrder(
+            (int) session('current_tenant_id'),
+            (int) $this->purchaseOrder->id,
+        );
+    }
+
+    public function getOrderTotalProperty(): string
+    {
+        return PurchaseOrderTotalCalculator::calculate($this->purchaseOrder);
+    }
+
+    public function getAdvanceSummaryProperty(): array
+    {
+        $total = '0';
+        $applied = '0';
+        $unapplied = '0';
+        $scheduled = 0;
+
+        foreach ($this->purchaseOrder->supplierAdvances as $advance) {
+            if ($advance->status === SupplierAdvanceStatus::Cancelled) {
+                continue;
+            }
+
+            $total = bcadd($total, (string) $advance->amount, 4);
+            $applied = bcadd($applied, (string) $advance->amount_applied, 4);
+
+            if ($advance->status === SupplierAdvanceStatus::Scheduled) {
+                $scheduled++;
+            } elseif (bccomp($advance->remainingAmount(), '0', 4) === 1) {
+                $unapplied = bcadd($unapplied, $advance->remainingAmount(), 4);
+            }
+        }
+
+        return [
+            'total' => $total,
+            'applied' => $applied,
+            'unapplied' => $unapplied,
+            'scheduled_count' => $scheduled,
+        ];
+    }
+
+    public function canRecordAdvance(): bool
+    {
+        return in_array($this->purchaseOrder->status, [PurchaseOrderStatus::Confirmed, PurchaseOrderStatus::PartiallyReceived], true);
     }
 
     public function preparePaymentModal(): void
@@ -65,6 +152,57 @@ class extends Component {
         $this->notes = '';
         $this->payment_method = SupplierPaymentMethod::Cash->value;
         $this->paid_at = Carbon::now()->format('Y-m-d\TH:i');
+    }
+
+    public function prepareAdvanceModal(): void
+    {
+        Gate::authorize('create', SupplierAdvance::class);
+        $this->advance_amount = '';
+        $this->advance_reference = '';
+        $this->advance_notes = '';
+        $this->advance_payment_method = SupplierPaymentMethod::Cash->value;
+        $this->advance_paid_at = Carbon::now()->format('Y-m-d\TH:i');
+        $this->resetAdvancePaymentMethodFields();
+    }
+
+    public function updatedAdvancePaymentMethod(): void
+    {
+        $this->resetAdvancePaymentMethodFields();
+    }
+
+    private function resetAdvancePaymentMethodFields(): void
+    {
+        $this->advance_cheque_number = '';
+        $this->advance_cheque_date = '';
+        $this->advance_cheque_bank = '';
+        $this->advance_cheque_payee = '';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function advancePaymentMethodDetailRules(): array
+    {
+        return match ($this->advance_payment_method) {
+            SupplierPaymentMethod::Pdc->value => [
+                'cheque_number' => ['required', 'string', 'max:64'],
+                'cheque_date' => ['required', 'date'],
+                'cheque_bank' => ['required', 'string', 'max:255'],
+                'cheque_payee' => ['nullable', 'string', 'max:255'],
+            ],
+            default => [],
+        };
+    }
+
+    private function resolveAdvanceReference(): ?string
+    {
+        if ($this->advance_reference !== '') {
+            return $this->advance_reference;
+        }
+
+        return $this->advance_payment_method === SupplierPaymentMethod::Pdc->value && $this->advance_cheque_number !== ''
+            ? $this->advance_cheque_number
+            : null;
     }
 
     public function getOpenPayablesForPurchaseOrderProperty()
@@ -231,6 +369,78 @@ class extends Component {
             Flux::toast(variant: 'danger', text: $e->getMessage());
         }
     }
+
+    public function recordSupplierAdvance(RecordSupplierAdvanceService $service): void
+    {
+        Gate::authorize('create', SupplierAdvance::class);
+
+        if (! $this->canRecordAdvance()) {
+            Flux::toast(variant: 'danger', text: __('Advances can only be recorded on open purchase orders.'));
+
+            return;
+        }
+
+        $paidAt = $this->advance_paid_at !== ''
+            ? Carbon::parse($this->advance_paid_at)->toDateTimeString()
+            : now()->toDateTimeString();
+
+        $payload = [
+            'purchase_order_id' => (string) $this->purchaseOrder->id,
+            'amount' => $this->advance_amount,
+            'payment_method' => $this->advance_payment_method,
+            'paid_at' => $paidAt,
+            'reference' => $this->resolveAdvanceReference(),
+            'notes' => $this->advance_notes !== '' ? $this->advance_notes : null,
+            'cheque_number' => $this->advance_cheque_number !== '' ? $this->advance_cheque_number : null,
+            'cheque_date' => $this->advance_cheque_date !== '' ? $this->advance_cheque_date : null,
+            'cheque_bank' => $this->advance_cheque_bank !== '' ? $this->advance_cheque_bank : null,
+            'cheque_payee' => $this->advance_cheque_payee !== '' ? $this->advance_cheque_payee : null,
+        ];
+
+        Validator::make(
+            $payload,
+            [
+                ...(new StoreSupplierAdvanceRequest)->rules(),
+                ...$this->advancePaymentMethodDetailRules(),
+            ],
+        )->validate();
+
+        try {
+            $service->execute(
+                (int) session('current_tenant_id'),
+                (int) $this->purchaseOrder->id,
+                (string) $payload['amount'],
+                (string) $payload['payment_method'],
+                $paidAt,
+                $payload['reference'],
+                $payload['notes'],
+                $payload['cheque_number'],
+                $payload['cheque_date'],
+                $payload['cheque_bank'],
+                $payload['cheque_payee'],
+                auth()->id() !== null ? (int) auth()->id() : null,
+            );
+            $this->refreshPurchaseOrder();
+            $this->modal('add-po-advance')->close();
+            Flux::toast(variant: 'success', text: __('Supplier advance recorded.'));
+            $this->prepareAdvanceModal();
+        } catch (\InvalidArgumentException $e) {
+            Flux::toast(variant: 'danger', text: $e->getMessage());
+        }
+    }
+
+    public function clearAdvancePdc(int $advanceId, ClearSupplierAdvancePdcService $service): void
+    {
+        Gate::authorize('update', SupplierAdvance::query()->findOrFail($advanceId));
+
+        try {
+            $service->execute((int) session('current_tenant_id'), $advanceId);
+            $this->refreshPurchaseOrder();
+            Flux::toast(variant: 'success', text: __('PDC advance marked as cleared.'));
+        } catch (\InvalidArgumentException $e) {
+            Flux::toast(variant: 'danger', text: $e->getMessage());
+        }
+    }
 }; ?>
 
 <div class="flex w-full max-w-6xl flex-1 flex-col gap-6">
@@ -274,9 +484,14 @@ class extends Component {
                         {{ __('Print PO') }}
                     </flux:button>
                 @endif
+                @if (Gate::allows('create', SupplierAdvance::class) && $this->canRecordAdvance())
+                    <flux:modal.trigger name="add-po-advance">
+                        <flux:button wire:click="prepareAdvanceModal" variant="primary">{{ __('Record advance') }}</flux:button>
+                    </flux:modal.trigger>
+                @endif
                 @if (Gate::allows('create', SupplierPayment::class) && $this->openPayablesForPurchaseOrder->isNotEmpty())
                     <flux:modal.trigger name="add-po-payment">
-                        <flux:button wire:click="preparePaymentModal" variant="primary">{{ __('Add payment') }}</flux:button>
+                        <flux:button wire:click="preparePaymentModal" variant="filled">{{ __('Add payment') }}</flux:button>
                     </flux:modal.trigger>
                 @endif
                 @if (! in_array($purchaseOrder->status, [PurchaseOrderStatus::Cancelled, PurchaseOrderStatus::Received], true))
@@ -433,6 +648,18 @@ class extends Component {
                         <flux:text class="text-sm text-zinc-600 dark:text-zinc-400">{{ __('Open payables') }}</flux:text>
                         <flux:text class="text-sm text-zinc-900 dark:text-zinc-100 font-medium">{{ $this->openPayablesForPurchaseOrder->count() }}</flux:text>
                     </div>
+                    <div class="flex items-center justify-between">
+                        <flux:text class="text-sm text-zinc-600 dark:text-zinc-400">{{ __('Order value') }}</flux:text>
+                        <flux:text class="text-sm text-zinc-900 dark:text-zinc-100 font-medium tabular-nums">{{ TenantMoney::format((float) $this->orderTotal, null, 2) }}</flux:text>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <flux:text class="text-sm text-zinc-600 dark:text-zinc-400">{{ __('Advances recorded') }}</flux:text>
+                        <flux:text class="text-sm text-zinc-900 dark:text-zinc-100 font-medium tabular-nums">{{ TenantMoney::format((float) $this->advanceSummary['total'], null, 2) }}</flux:text>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <flux:text class="text-sm text-zinc-600 dark:text-zinc-400">{{ __('Unapplied advance') }}</flux:text>
+                        <flux:text class="text-sm text-zinc-900 dark:text-zinc-100 font-medium tabular-nums">{{ TenantMoney::format((float) $this->advanceSummary['unapplied'], null, 2) }}</flux:text>
+                    </div>
                 </div>
             </flux:card>
         </div>
@@ -445,14 +672,82 @@ class extends Component {
             :heading="__('No open payables currently')"
             :text="__('Liabilities are either fully paid or not posted yet. Post accounts payable entries after receipts if needed.')"
         />
-    @elseif (Gate::allows('create', SupplierPayment::class) && $purchaseOrder->goodsReceipts->isEmpty())
+    @elseif (Gate::allows('create', SupplierAdvance::class) && $purchaseOrder->goodsReceipts->isEmpty() && bccomp($this->advanceSummary['total'], '0', 4) !== 1)
         <flux:callout
             color="zinc"
             icon="information-circle"
-            :heading="__('Payment allocation is not available yet')"
-            :text="__('Receive goods first, then post accounts payable to allocate payments against this order.')"
+            :heading="__('Payment before receipt')"
+            :text="__('Record a supplier advance when payment is issued with the purchase order. After goods are received and payables are posted, cleared advances apply automatically.')"
+        />
+    @elseif ($this->advanceSummary['scheduled_count'] > 0)
+        <flux:callout
+            color="amber"
+            icon="clock"
+            :heading="__('Scheduled PDC advances')"
+            :text="__('One or more PDC advances are not cleared yet. Clear them when the cheque is issued or deposited before they can apply to payables.')"
         />
     @endif
+    <div class="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
+        <div class="border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
+            <flux:heading size="lg">{{ __('Supplier advances') }}</flux:heading>
+            <flux:text class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                {{ __('Record prepayments before goods are received. Cleared advances auto-apply when accounts payable is posted.') }}
+            </flux:text>
+        </div>
+        @if ($purchaseOrder->supplierAdvances->where('status', '!=', SupplierAdvanceStatus::Cancelled)->isEmpty())
+            <div class="p-6">
+                <flux:callout
+                    icon="banknotes"
+                    color="zinc"
+                    inline
+                    :heading="__('No advances yet')"
+                    :text="__('Record an advance when payment is issued with the purchase order, before pickup or delivery.')"
+                />
+            </div>
+        @else
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
+                    <thead class="bg-zinc-50 dark:bg-zinc-800/50">
+                        <tr>
+                            <th class="px-6 py-3 text-start font-medium text-zinc-600 dark:text-zinc-400">{{ __('Paid at') }}</th>
+                            <th class="px-6 py-3 text-start font-medium text-zinc-600 dark:text-zinc-400">{{ __('Method') }}</th>
+                            <th class="px-6 py-3 text-end font-medium text-zinc-600 dark:text-zinc-400">{{ __('Amount') }}</th>
+                            <th class="px-6 py-3 text-end font-medium text-zinc-600 dark:text-zinc-400">{{ __('Remaining') }}</th>
+                            <th class="px-6 py-3 text-start font-medium text-zinc-600 dark:text-zinc-400">{{ __('Status') }}</th>
+                            <th class="px-6 py-3 text-end font-medium text-zinc-600 dark:text-zinc-400">{{ __('Actions') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
+                        @foreach ($purchaseOrder->supplierAdvances->where('status', '!=', SupplierAdvanceStatus::Cancelled)->sortByDesc('paid_at') as $advance)
+                            <tr wire:key="adv-{{ $advance->id }}">
+                                <td class="px-6 py-3 text-zinc-700 dark:text-zinc-300">
+                                    {{ $advance->paid_at->translatedFormat('M j, Y - h:i A') }}
+                                    @if ($advance->payment_method === SupplierPaymentMethod::Pdc && $advance->cheque_date)
+                                        <div class="text-xs text-zinc-500">{{ __('Cheque: :date', ['date' => $advance->cheque_date->translatedFormat('M j, Y')]) }}</div>
+                                    @endif
+                                </td>
+                                <td class="px-6 py-3 text-zinc-700 dark:text-zinc-300">{{ $advance->payment_method->label() }}</td>
+                                <td class="px-6 py-3 text-end tabular-nums">{{ TenantMoney::format((float) $advance->amount, null, 2) }}</td>
+                                <td class="px-6 py-3 text-end tabular-nums">{{ TenantMoney::format((float) $advance->remainingAmount(), null, 2) }}</td>
+                                <td class="px-6 py-3">
+                                    <flux:badge :color="$advance->status === SupplierAdvanceStatus::Scheduled ? 'amber' : ($advance->isFullyApplied() ? 'emerald' : 'teal')">
+                                        {{ $advance->status === SupplierAdvanceStatus::Scheduled ? $advance->status->label() : ($advance->isFullyApplied() ? __('Applied') : __('Available')) }}
+                                    </flux:badge>
+                                </td>
+                                <td class="px-6 py-3 text-end">
+                                    @if ($advance->status === SupplierAdvanceStatus::Scheduled && Gate::allows('update', $advance))
+                                        <flux:button size="xs" variant="primary" wire:click="clearAdvancePdc({{ $advance->id }})">
+                                            {{ __('Clear PDC') }}
+                                        </flux:button>
+                                    @endif
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
+    </div>
 
     @if (Gate::allows('update', $purchaseOrder) && in_array($purchaseOrder->status, [PurchaseOrderStatus::Confirmed, PurchaseOrderStatus::PartiallyReceived], true))
         <flux:modal name="close-po" class="max-w-lg">
@@ -477,6 +772,69 @@ class extends Component {
                             <flux:button variant="ghost" type="button">{{ __('Cancel') }}</flux:button>
                         </flux:modal.close>
                         <flux:button variant="danger" type="submit">{{ __('Close purchase order') }}</flux:button>
+                    </div>
+                </form>
+            </div>
+        </flux:modal>
+    @endif
+
+    @if (Gate::allows('create', SupplierAdvance::class) && $this->canRecordAdvance())
+        <flux:modal name="add-po-advance" class="max-w-lg">
+            <div class="space-y-4">
+                <div>
+                    <flux:heading size="lg">{{ __('Record supplier advance') }}</flux:heading>
+                    <flux:text class="mt-1">
+                        {{ __('Issue payment before goods are received. Maximum remaining: :amount.', [
+                            'amount' => TenantMoney::format(
+                                max(0, (float) bcsub($this->orderTotal, $this->advanceSummary['total'], 4)),
+                                null,
+                                2,
+                            ),
+                        ]) }}
+                    </flux:text>
+                </div>
+
+                <form wire:submit="recordSupplierAdvance" class="flex flex-col gap-4">
+                    <flux:input
+                        wire:model="advance_amount"
+                        :label="__('Advance amount')"
+                        type="text"
+                        inputmode="decimal"
+                        required
+                    />
+
+                    <flux:select wire:model.live="advance_payment_method" :label="__('Payment method')" required>
+                        @foreach (SupplierPaymentMethod::cases() as $method)
+                            <flux:select.option :value="$method->value">{{ $method->label() }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+
+                    @if ($advance_payment_method === SupplierPaymentMethod::Pdc->value)
+                        <div class="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
+                            <flux:heading size="sm">{{ __('Cheque details') }}</flux:heading>
+                            <div class="grid gap-4 sm:grid-cols-2">
+                                <flux:input wire:model="advance_cheque_number" :label="__('Cheque number')" type="text" required />
+                                <flux:input wire:model="advance_cheque_date" :label="__('Cheque date')" type="date" required />
+                                <flux:input wire:model="advance_cheque_bank" :label="__('Bank')" type="text" required class="sm:col-span-2" />
+                                <flux:input wire:model="advance_cheque_payee" :label="__('Payee (optional)')" type="text" class="sm:col-span-2" />
+                            </div>
+                            <flux:text class="text-xs text-zinc-500">
+                                {{ __('Future-dated cheques stay scheduled until you clear them on or after the cheque date.') }}
+                            </flux:text>
+                        </div>
+                    @endif
+
+                    <flux:input wire:model="advance_paid_at" :label="__('Paid at')" type="datetime-local" required />
+
+                    <flux:input wire:model="advance_reference" :label="__('Reference (optional)')" type="text" />
+
+                    <flux:textarea wire:model="advance_notes" :label="__('Notes')" rows="2" />
+
+                    <div class="flex flex-wrap justify-end gap-2">
+                        <flux:modal.close>
+                            <flux:button variant="ghost" type="button">{{ __('Cancel') }}</flux:button>
+                        </flux:modal.close>
+                        <flux:button variant="primary" type="submit">{{ __('Save advance') }}</flux:button>
                     </div>
                 </form>
             </div>

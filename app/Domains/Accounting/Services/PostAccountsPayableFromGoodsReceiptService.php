@@ -7,12 +7,18 @@ use App\Enums\GoodsReceiptStatus;
 use App\Models\AccountsPayable;
 use App\Models\GoodsReceipt;
 use App\Models\GoodsReceiptLine;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class PostAccountsPayableFromGoodsReceiptService
 {
+    public function __construct(
+        private readonly ApplySupplierAdvancesToPayableService $applyAdvances,
+    ) {}
+
     public function execute(int $tenantId, int $goodsReceiptId): AccountsPayable
     {
+        return DB::transaction(function () use ($tenantId, $goodsReceiptId): AccountsPayable {
         $receipt = GoodsReceipt::query()
             ->where('tenant_id', $tenantId)
             ->with(['lines.purchaseOrderLine', 'purchaseOrder'])
@@ -40,7 +46,7 @@ class PostAccountsPayableFromGoodsReceiptService
             $total = bcadd($total, $lineTotal, 4);
         }
 
-        return AccountsPayable::query()->create([
+        $payable = AccountsPayable::query()->create([
             'tenant_id' => $tenantId,
             'goods_receipt_id' => $receipt->id,
             'supplier_id' => $supplierId,
@@ -54,5 +60,10 @@ class PostAccountsPayableFromGoodsReceiptService
             'status' => OpenItemStatusResolver::fromAmounts($total, '0'),
             'posted_at' => $receipt->received_at->toDateTimeString(),
         ]);
+
+        $this->applyAdvances->execute($tenantId, $payable->id);
+
+        return $payable->fresh();
+        });
     }
 }
