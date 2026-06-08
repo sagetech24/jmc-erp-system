@@ -268,7 +268,7 @@ class extends Component {
                             <flux:table.cell class="px-6!">
                                 <flux:button size="xs" variant="primary" wire:navigate :href="route('products.show', $movement->product->id)">
                                     <flux:icon name="eye" class="w-4 h-4" />
-                                    {{ __('View product') }}
+                                    {{ __('View') }}
                                 </flux:button>
                             </flux:table.cell>
                         </flux:table.row>

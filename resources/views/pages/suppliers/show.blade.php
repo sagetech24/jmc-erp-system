@@ -48,7 +48,7 @@ class extends Component {
 
     private function normalizeTab(string $tab): string
     {
-        $allowed = ['overview', 'purchase_orders', 'receipts_ap', 'payments'];
+        $allowed = ['overview', 'purchase_orders', 'goods_receipts', 'ap', 'payments'];
 
         return in_array($tab, $allowed, true) ? $tab : 'overview';
     }
@@ -81,6 +81,7 @@ class extends Component {
             ->where('tenant_id', $tenantId)
             ->whereHas('purchaseOrder', fn ($q) => $q->where('supplier_id', $this->supplier->id))
             ->with(['purchaseOrder', 'accountsPayable'])
+            ->withCount('lines')
             ->latest('received_at')
             ->limit(50)
             ->get();
@@ -122,6 +123,7 @@ class extends Component {
     $tabClass = 'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition';
     $tabActive = 'bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:ring-white/10';
     $tabIdle = 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100';
+    $buttonClass = 'cursor-pointer border border-zinc-200 dark:border-zinc-700';
 @endphp
 
 <div class="flex w-full flex-1 flex-col gap-6">
@@ -144,21 +146,21 @@ class extends Component {
         </div>
         <div class="flex flex-wrap gap-2">
             @can('create', \App\Models\Rfq::class)
-                <flux:button variant="primary" :href="route('procurement.rfqs.create', ['supplier_id' => $supplier->id])" wire:navigate>
+                <flux:button variant="filled" class="{{ $buttonClass }}" :href="route('procurement.rfqs.create', ['supplier_id' => $supplier->id])" wire:navigate>
                     {{ __('Create Purchase Request') }}
                 </flux:button>
             @endcan
             @can('create', \App\Models\PurchaseOrder::class)
-                <flux:button variant="filled" :href="route('procurement.purchase-orders.create', ['supplier_id' => $supplier->id])" wire:navigate>
+                <flux:button variant="filled" class="{{ $buttonClass }}" :href="route('procurement.purchase-orders.create', ['supplier_id' => $supplier->id])" wire:navigate>
                     {{ __('Create Purchase Order') }}
                 </flux:button>
             @endcan
             @can('create', SupplierPayment::class)
-                <flux:button variant="outline" :href="route('accounting.supplier-payments.create', ['supplier_id' => $supplier->id])" wire:navigate>
+                <flux:button variant="filled" class="{{ $buttonClass }}" :href="route('accounting.supplier-payments.create', ['supplier_id' => $supplier->id])" wire:navigate>
                     {{ __('Record payment') }}
                 </flux:button>
             @endcan
-            <flux:button variant="ghost" :href="route('suppliers.index')" wire:navigate>
+            <flux:button variant="filled" class="{{ $buttonClass }}" :href="route('suppliers.index')" wire:navigate>
                 <flux:icon name="arrow-left" class="w-4 h-4" />
                 {{ __('Back') }}
             </flux:button>
@@ -172,7 +174,10 @@ class extends Component {
         <button type="button" wire:click="setTab('purchase_orders')" class="{{ $tabClass }} {{ $tab === 'purchase_orders' ? $tabActive : $tabIdle }}">
             {{ __('Purchase Orders') }}
         </button>
-        <button type="button" wire:click="setTab('receipts_ap')" class="{{ $tabClass }} {{ $tab === 'receipts_ap' ? $tabActive : $tabIdle }}">
+        <button type="button" wire:click="setTab('goods_receipts')" class="{{ $tabClass }} {{ $tab === 'goods_receipts' ? $tabActive : $tabIdle }}">
+            {{ __('Goods Receipts') }}
+        </button>
+        <button type="button" wire:click="setTab('ap')" class="{{ $tabClass }} {{ $tab === 'ap' ? $tabActive : $tabIdle }}">
             {{ __('Accounts Payables') }}
         </button>
         <button type="button" wire:click="setTab('payments')" class="{{ $tabClass }} {{ $tab === 'payments' ? $tabActive : $tabIdle }}">
@@ -205,7 +210,7 @@ class extends Component {
                 <flux:text class="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
                     {{ __('Last PO:') }}
                     @if ($metrics['last_po_date'])
-                        {{ $metrics['last_po_date']->format('Y-m-d') }}
+                        {{ $metrics['last_po_date']->translatedFormat('F j, Y') }}
                     @else
                         —
                     @endif
@@ -213,7 +218,7 @@ class extends Component {
                 <flux:text class="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
                     {{ __('Last payment:') }}
                     @if ($metrics['last_payment_at'])
-                        {{ $metrics['last_payment_at']->format('Y-m-d H:i') }}
+                        {{ $metrics['last_payment_at']->translatedFormat('M j, Y — g:i A') }}
                     @else
                         —
                     @endif
@@ -288,7 +293,7 @@ class extends Component {
             <flux:card class="p-6">
                 <flux:heading size="lg">{{ __('Edit from list') }}</flux:heading>
                 <flux:text class="mt-1 text-sm">{{ __('Master data changes are made from the suppliers list.') }}</flux:text>
-                <flux:button class="mt-4" variant="primary" :href="route('suppliers.index')" wire:navigate>{{ __('Go to suppliers') }}</flux:button>
+                <flux:button class="mt-4 {{ $buttonClass }}" variant="filled" :href="route('suppliers.index')" wire:navigate>{{ __('Go to suppliers') }}</flux:button>
             </flux:card>
         @endcan
     @endif
@@ -312,11 +317,11 @@ class extends Component {
                         @foreach ($this->purchaseOrders as $po)
                             <flux:table.row :key="'po-'.$po->id">
                                 <flux:table.cell variant="strong" class="px-6! font-mono">{{ $po->reference_code }}</flux:table.cell>
-                                <flux:table.cell class="px-6!">{{ $po->order_date->format('Y-m-d') }}</flux:table.cell>
+                                <flux:table.cell class="px-6!">{{ $po->order_date->translatedFormat('F j, Y') }}</flux:table.cell>
                                 <flux:table.cell class="px-6!">{{ $po->status->value === 'cancelled' ? __('Close PO') : \Illuminate\Support\Str::headline($po->status->value) }}</flux:table.cell>
                                 <flux:table.cell align="end" class="px-6! tabular-nums">{{ $po->lines->count() }}</flux:table.cell>
                                 <flux:table.cell align="end" class="px-6!">
-                                    <flux:button size="sm" variant="ghost" :href="route('procurement.purchase-orders.show', $po->id)" wire:navigate>
+                                    <flux:button size="xs" variant="primary" class="{{ $buttonClass }}" :href="route('procurement.purchase-orders.show', $po->id)" wire:navigate>
                                         {{ __('View') }}
                                     </flux:button>
                                 </flux:table.cell>
@@ -328,85 +333,78 @@ class extends Component {
         </flux:card>
     @endif
 
-    @if ($tab === 'receipts_ap')
-        <div class="flex flex-col gap-6">
-            <flux:card class="overflow-hidden p-0">
-                <div class="border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
-                    <flux:heading size="lg">{{ __('Goods receipts') }}</flux:heading>
+    @if ($tab === 'goods_receipts')
+        <flux:card class="overflow-hidden p-0">
+            @if ($this->goodsReceipts->isEmpty())
+                <div class="p-8">
+                    <flux:callout icon="truck" color="zinc" inline :heading="__('No receipts')" :text="__('Receipts appear when goods are received against purchase orders.')" />
                 </div>
-                @if ($this->goodsReceipts->isEmpty())
-                    <div class="p-8">
-                        <flux:callout icon="truck" color="zinc" inline :heading="__('No receipts')" :text="__('Receipts appear when goods are received against purchase orders.')" />
-                    </div>
-                @else
-                    <flux:table>
-                        <flux:table.columns sticky class="bg-neutral-200 dark:bg-neutral-600">
-                            <flux:table.column class="px-6!">{{ __('Receipt') }}</flux:table.column>
-                            <flux:table.column class="px-6!">{{ __('PO') }}</flux:table.column>
-                            <flux:table.column class="px-6!">{{ __('Received') }}</flux:table.column>
-                            <flux:table.column class="px-6!">{{ __('Supplier invoice ref.') }}</flux:table.column>
-                            <flux:table.column align="end" class="w-0 whitespace-nowrap px-6!">{{ __('Receipt') }}</flux:table.column>
-                        </flux:table.columns>
-                        <flux:table.rows>
-                            @foreach ($this->goodsReceipts as $gr)
-                                <flux:table.row :key="'gr-'.$gr->id">
-                                    <flux:table.cell class="px-6! font-mono">#{{ $gr->id }}</flux:table.cell>
-                                    <flux:table.cell class="px-6! font-mono">{{ $gr->purchaseOrder->reference_code }}</flux:table.cell>
-                                    <flux:table.cell class="px-6!">{{ $gr->received_at->format('Y-m-d H:i') }}</flux:table.cell>
-                                    <flux:table.cell class="px-6!">{{ $gr->supplier_invoice_reference ?: '—' }}</flux:table.cell>
-                                    <flux:table.cell align="end" class="px-6!">
-                                        <div class="flex flex-wrap justify-end gap-1">
-                                            <flux:button size="sm" variant="ghost" :href="route('procurement.goods-receipts.show', $gr->id)" wire:navigate>
-                                                {{ __('Receipt') }}
-                                            </flux:button>
-                                            <flux:button size="sm" variant="outline" :href="route('procurement.purchase-orders.show', $gr->purchase_order_id)" wire:navigate>
-                                                {{ __('PO') }}
-                                            </flux:button>
-                                        </div>
-                                    </flux:table.cell>
-                                </flux:table.row>
-                            @endforeach
-                        </flux:table.rows>
-                    </flux:table>
-                @endif
-            </flux:card>
+            @else
+                <flux:table>
+                    <flux:table.columns sticky class="bg-neutral-200 dark:bg-neutral-600">
+                        <flux:table.column class="px-6!">{{ __('Receipt') }}</flux:table.column>
+                        <flux:table.column class="px-6!">{{ __('PO') }}</flux:table.column>
+                        <flux:table.column class="px-6!">{{ __('Received') }}</flux:table.column>
+                        <flux:table.column class="px-6!">{{ __('Status') }}</flux:table.column>
+                        <flux:table.column align="end" class="px-6!">{{ __('Lines') }}</flux:table.column>
+                        <flux:table.column class="px-6!">{{ __('Supplier invoice ref.') }}</flux:table.column>
+                        <flux:table.column align="end" class="w-0 whitespace-nowrap px-6!"></flux:table.column>
+                    </flux:table.columns>
+                    <flux:table.rows>
+                        @foreach ($this->goodsReceipts as $gr)
+                            <flux:table.row :key="'gr-'.$gr->id">
+                                <flux:table.cell variant="strong" class="px-6! font-mono">#{{ $gr->id }}</flux:table.cell>
+                                <flux:table.cell class="px-6! font-mono">{{ $gr->purchaseOrder->reference_code }}</flux:table.cell>
+                                <flux:table.cell class="px-6!">{{ $gr->received_at->translatedFormat('M j, Y — g:i A') }}</flux:table.cell>
+                                <flux:table.cell class="px-6!">{{ \Illuminate\Support\Str::headline($gr->status->value) }}</flux:table.cell>
+                                <flux:table.cell align="end" class="px-6! tabular-nums">{{ $gr->lines_count }}</flux:table.cell>
+                                <flux:table.cell class="px-6!">{{ $gr->supplier_invoice_reference ?: '—' }}</flux:table.cell>
+                                <flux:table.cell align="end" class="px-6!">
+                                    <flux:button size="xs" variant="primary" class="{{ $buttonClass }}" :href="route('procurement.goods-receipts.show', $gr->id)" wire:navigate>
+                                        {{ __('View') }}
+                                    </flux:button>
+                                </flux:table.cell>
+                            </flux:table.row>
+                        @endforeach
+                    </flux:table.rows>
+                </flux:table>
+            @endif
+        </flux:card>
+    @endif
 
-            <flux:card class="overflow-hidden p-0">
-                <div class="border-b border-zinc-200 px-6 py-4 dark:border-zinc-700">
-                    <flux:heading size="lg">{{ __('Accounts payable') }}</flux:heading>
+    @if ($tab === 'ap')
+        <flux:card class="overflow-hidden p-0">
+            @if ($this->accountsPayables->isEmpty())
+                <div class="p-8">
+                    <flux:callout icon="banknotes" color="zinc" inline :heading="__('No AP rows')" :text="__('Post goods receipts to accounts payable from the AP workspace.')" />
                 </div>
-                @if ($this->accountsPayables->isEmpty())
-                    <div class="p-8">
-                        <flux:callout icon="banknotes" color="zinc" inline :heading="__('No AP rows')" :text="__('Post goods receipts to accounts payable from the AP workspace.')" />
-                    </div>
-                @else
-                    <flux:table>
-                        <flux:table.columns sticky class="bg-neutral-200 dark:bg-neutral-600">
-                            <flux:table.column class="px-6!">{{ __('Posted') }}</flux:table.column>
-                            <flux:table.column align="end" class="px-6!">{{ __('Total') }}</flux:table.column>
-                            <flux:table.column align="end" class="px-6!">{{ __('Paid') }}</flux:table.column>
-                            <flux:table.column class="px-6!">{{ __('Status') }}</flux:table.column>
-                            <flux:table.column align="end" class="w-0 whitespace-nowrap px-6!"></flux:table.column>
-                        </flux:table.columns>
-                        <flux:table.rows>
-                            @foreach ($this->accountsPayables as $ap)
-                                <flux:table.row :key="'ap-'.$ap->id">
-                                    <flux:table.cell class="px-6!">{{ $ap->posted_at?->format('Y-m-d') ?? '—' }}</flux:table.cell>
-                                    <flux:table.cell align="end" class="px-6! tabular-nums">{{ TenantMoney::format((float) $ap->total_amount, null, 4) }}</flux:table.cell>
-                                    <flux:table.cell align="end" class="px-6! tabular-nums">{{ TenantMoney::format((float) $ap->amount_paid, null, 4) }}</flux:table.cell>
-                                    <flux:table.cell class="px-6!">{{ \Illuminate\Support\Str::headline($ap->status->value) }}</flux:table.cell>
-                                    <flux:table.cell align="end" class="px-6!">
-                                        <flux:button size="sm" variant="ghost" :href="route('accounting.payables.index')" wire:navigate>
-                                            {{ __('AP') }}
-                                        </flux:button>
-                                    </flux:table.cell>
-                                </flux:table.row>
-                            @endforeach
-                        </flux:table.rows>
-                    </flux:table>
-                @endif
-            </flux:card>
-        </div>
+            @else
+                <flux:table>
+                    <flux:table.columns sticky class="bg-neutral-200 dark:bg-neutral-600">
+                        <flux:table.column class="px-6!">{{ __('Posted') }}</flux:table.column>
+                        <flux:table.column align="end" class="px-6!">{{ __('Total') }}</flux:table.column>
+                        <flux:table.column align="end" class="px-6!">{{ __('Paid') }}</flux:table.column>
+                        <flux:table.column class="px-6!">{{ __('Status') }}</flux:table.column>
+                        <flux:table.column align="end" class="w-0 whitespace-nowrap px-6!"></flux:table.column>
+                    </flux:table.columns>
+                    <flux:table.rows>
+                        @foreach ($this->accountsPayables as $ap)
+                            <flux:table.row :key="'ap-'.$ap->id">
+                                <flux:table.cell class="px-6!">{{ $ap->posted_at?->translatedFormat('M j, Y — g:i A') ?? '—' }}</flux:table.cell>
+                                <flux:table.cell align="end" class="px-6! tabular-nums">{{ TenantMoney::format((float) $ap->total_amount, null, 4) }}</flux:table.cell>
+                                <flux:table.cell align="end" class="px-6! tabular-nums">{{ TenantMoney::format((float) $ap->amount_paid, null, 4) }}</flux:table.cell>
+                                <flux:table.cell class="px-6!">{{ \Illuminate\Support\Str::headline($ap->status->value) }}</flux:table.cell>
+                                <flux:table.cell align="end" class="px-6!">
+                                    <flux:button size="xs" variant="primary" class="{{ $buttonClass }}" :href="route('accounting.payables.index')" wire:navigate>
+                                        {{ __('View') }}
+                                    </flux:button>
+                                </flux:table.cell>
+                            </flux:table.row>
+                        @endforeach
+                    </flux:table.rows>
+                </flux:table>
+            @endif
+        </flux:card>
     @endif
 
     @if ($tab === 'payments')
@@ -426,7 +424,7 @@ class extends Component {
                     <flux:table.rows>
                         @foreach ($this->supplierPayments as $pay)
                             <flux:table.row :key="'pay-'.$pay->id">
-                                <flux:table.cell class="px-6!">{{ $pay->paid_at->format('Y-m-d H:i') }}</flux:table.cell>
+                                <flux:table.cell class="px-6!">{{ $pay->paid_at->translatedFormat('M j, Y — g:i A') }}</flux:table.cell>
                                 <flux:table.cell align="end" class="px-6! tabular-nums">{{ TenantMoney::format((float) $pay->amount) }}</flux:table.cell>
                                 <flux:table.cell class="px-6!">{{ $pay->payment_method->label() }}</flux:table.cell>
                                 <flux:table.cell class="px-6!">{{ $pay->reference ?: '—' }}</flux:table.cell>
