@@ -32,6 +32,23 @@ class PurchaseOrderPolicy
         return $user->tenants()->whereKey($purchaseOrder->tenant_id)->exists();
     }
 
+    public function print(User $user, PurchaseOrder $purchaseOrder): bool
+    {
+        if (! $purchaseOrder->status->isPrintable()) {
+            return false;
+        }
+
+        return $this->isTenantAdmin($user, $purchaseOrder->tenant_id);
+    }
+
+    private function isTenantAdmin(User $user, int $tenantId): bool
+    {
+        return $user->tenants()
+            ->whereKey($tenantId)
+            ->wherePivot('role', 'owner')
+            ->exists();
+    }
+
     private function onboardedToCurrentTenant(User $user): bool
     {
         $tenantId = session('current_tenant_id');

@@ -24,6 +24,7 @@ Route::middleware(['auth', 'verified', 'tenant.context'])->group(function () {
     Route::livewire('procurement/rfqs/{id}', 'pages::procurement.rfqs.show')->name('procurement.rfqs.show');
     Route::livewire('procurement/purchase-orders', 'pages::procurement.purchase-orders.index')->name('procurement.purchase-orders.index');
     Route::livewire('procurement/purchase-orders/create', 'pages::procurement.purchase-orders.create')->name('procurement.purchase-orders.create');
+    Route::livewire('procurement/purchase-orders/{id}/print', 'pages::procurement.purchase-orders.print')->name('procurement.purchase-orders.print');
     Route::livewire('procurement/purchase-orders/{id}', 'pages::procurement.purchase-orders.show')->name('procurement.purchase-orders.show');
     Route::livewire('procurement/goods-receipts', 'pages::procurement.goods-receipts.index')->name('procurement.goods-receipts.index');
     Route::livewire('procurement/goods-receipts/{id}', 'pages::procurement.goods-receipts.show')->name('procurement.goods-receipts.show');

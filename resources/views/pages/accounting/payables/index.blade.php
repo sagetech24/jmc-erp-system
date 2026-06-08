@@ -47,7 +47,6 @@ class extends Component {
         Gate::authorize('viewAny', SupplierPaymentRun::class);
 
         $this->runScheduledFor = now()->toDateString();
-        $this->runDueDateTo = now()->toDateString();
         $this->runPaymentMethod = SupplierPaymentMethod::BankTransfer->value;
     }
 
@@ -91,12 +90,6 @@ class extends Component {
         $this->resetPage();
     }
 
-    public function togglePayableSelection(int $payableId): void
-    {
-        $current = (bool) ($this->selectedPayables[$payableId] ?? false);
-        $this->selectedPayables[$payableId] = ! $current;
-    }
-
     public function clearSelection(): void
     {
         $this->selectedPayables = [];
@@ -117,16 +110,22 @@ class extends Component {
         ];
         Validator::make($payload, (new StoreSupplierPaymentRunRequest)->rules())->validate();
 
-        $run = $service->execute(
-            (int) session('current_tenant_id'),
-            (int) auth()->id(),
-            $payload['scheduled_for'],
-            $payload['payment_method'],
-            $payload['supplier_id'],
-            $payload['due_date_to'],
-            $payload['notes'],
-            $selectedIds,
-        );
+        try {
+            $run = $service->execute(
+                (int) session('current_tenant_id'),
+                (int) auth()->id(),
+                $payload['scheduled_for'],
+                $payload['payment_method'],
+                $payload['supplier_id'],
+                $payload['due_date_to'],
+                $payload['notes'],
+                $selectedIds,
+            );
+        } catch (\InvalidArgumentException $e) {
+            Flux::toast(variant: 'danger', text: $e->getMessage());
+
+            return;
+        }
 
         $this->clearSelection();
         Flux::toast(variant: 'success', text: __('Payment run :code created with :count items.', ['code' => $run->reference_code, 'count' => $run->items->count()]));
@@ -339,7 +338,7 @@ class extends Component {
                     @forelse ($this->payables as $payable)
                         @php $remaining = \App\Domains\Accounting\Support\OpenItemStatusResolver::remaining((string) $payable->total_amount, (string) $payable->amount_paid); @endphp
                         <tr wire:key="ap-{{ $payable->id }}">
-                            <td class="px-4 py-3"><input type="checkbox" wire:click="togglePayableSelection({{ $payable->id }})" @checked((bool) ($selectedPayables[$payable->id] ?? false))></td>
+                            <td class="px-4 py-3"><input type="checkbox" wire:model.live="selectedPayables.{{ $payable->id }}"></td>
                             <td class="px-4 py-3 font-medium">#{{ $payable->id }}</td>
                             <td class="px-4 py-3">{{ $payable->supplier->name }}</td>
                             <td class="px-4 py-3">{{ $payable->invoice_number ?? '—' }}</td>
@@ -360,7 +359,7 @@ class extends Component {
 
     <flux:card class="p-6">
         <flux:heading size="lg">{{ __('Create payment run') }}</flux:heading>
-        <flux:text class="mt-1 text-sm">{{ __('Build a draft run from selected rows or by filter criteria, then approve and execute from the run detail page.') }}</flux:text>
+        <flux:text class="mt-1 text-sm">{{ __('Select open payables above, or leave none selected and optionally filter by supplier or due date. Only open or partially paid items are included.') }}</flux:text>
         <form wire:submit="createPaymentRun" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <flux:input wire:model="runScheduledFor" :label="__('Scheduled date')" type="date" required />
             <flux:select wire:model="runPaymentMethod" :label="__('Payment method')">

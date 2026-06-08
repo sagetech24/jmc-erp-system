@@ -9,6 +9,7 @@ use App\Models\SupplierPaymentRun;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use InvalidArgumentException;
 
 class BuildSupplierPaymentRunService
 {
@@ -35,6 +36,12 @@ class BuildSupplierPaymentRunService
             $notes,
             $selectedPayableIds
         ): SupplierPaymentRun {
+            $payables = $this->eligiblePayables($tenantId, $supplierId, $dueDateTo, $selectedPayableIds);
+
+            if ($payables->isEmpty()) {
+                throw new InvalidArgumentException(__('No open payables matched the payment run criteria. Select rows in the table, clear the due-date filter, or post new receipts to AP.'));
+            }
+
             $run = SupplierPaymentRun::query()->create([
                 'tenant_id' => $tenantId,
                 'reference_code' => $this->nextReferenceCode(),
@@ -44,8 +51,6 @@ class BuildSupplierPaymentRunService
                 'notes' => $notes,
                 'created_by' => $createdBy,
             ]);
-
-            $payables = $this->eligiblePayables($tenantId, $supplierId, $dueDateTo, $selectedPayableIds);
 
             $proposed = '0';
             foreach ($payables as $payable) {
@@ -85,11 +90,15 @@ class BuildSupplierPaymentRunService
         return AccountsPayable::query()
             ->where('tenant_id', $tenantId)
             ->whereIn('status', [AccountingOpenItemStatus::Open, AccountingOpenItemStatus::Partial])
-            ->when($supplierId !== null, fn ($query) => $query->where('supplier_id', $supplierId))
-            ->when($dueDateTo !== null && Schema::hasColumn('accounts_payable', 'due_date'), fn ($query) => $query->whereDate('due_date', '<=', $dueDateTo))
             ->when(
                 $selectedPayableIds !== [],
-                fn ($query) => $query->whereIn('id', $selectedPayableIds)
+                fn ($query) => $query->whereIn('id', $selectedPayableIds),
+                fn ($query) => $query
+                    ->when($supplierId !== null, fn ($inner) => $inner->where('supplier_id', $supplierId))
+                    ->when(
+                        $dueDateTo !== null && Schema::hasColumn('accounts_payable', 'due_date'),
+                        fn ($inner) => $inner->whereDate('due_date', '<=', $dueDateTo)
+                    )
             )
             ->with('supplier')
             ->when(Schema::hasColumn('accounts_payable', 'due_date'), fn ($query) => $query->orderBy('due_date'))

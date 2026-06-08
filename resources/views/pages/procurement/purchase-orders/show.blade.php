@@ -263,6 +263,17 @@ class extends Component {
             </div>
 
             <div class="flex flex-wrap items-center gap-2">
+                @if (Gate::allows('print', $purchaseOrder))
+                    <flux:button
+                        :href="route('procurement.purchase-orders.print', $purchaseOrder->id)"
+                        target="_blank"
+                        variant="filled"
+                        class="flex items-center gap-2 cursor-pointer border"
+                    >
+                        <flux:icon name="printer" class="size-4" />
+                        {{ __('Print PO') }}
+                    </flux:button>
+                @endif
                 @if (Gate::allows('create', SupplierPayment::class) && $this->openPayablesForPurchaseOrder->isNotEmpty())
                     <flux:modal.trigger name="add-po-payment">
                         <flux:button wire:click="preparePaymentModal" variant="primary">{{ __('Add payment') }}</flux:button>

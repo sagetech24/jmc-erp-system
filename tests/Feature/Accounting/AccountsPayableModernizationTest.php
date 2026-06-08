@@ -4,6 +4,7 @@ namespace Tests\Feature\Accounting;
 
 use App\Domains\Accounting\Services\ApproveSupplierPaymentRunService;
 use App\Domains\Accounting\Services\BuildSupplierPaymentRunService;
+use App\Domains\Accounting\Services\DeleteSupplierPaymentRunService;
 use App\Domains\Accounting\Services\ExecuteSupplierPaymentRunService;
 use App\Domains\Accounting\Services\PostAccountsPayableFromGoodsReceiptService;
 use App\Domains\Procurement\Services\PostGoodsReceiptService;
@@ -76,6 +77,111 @@ class AccountsPayableModernizationTest extends TestCase
             ->set('activeTab', 'overdue')
             ->assertSee('INV-OVERDUE')
             ->assertDontSee('INV-FUTURE');
+    }
+
+    public function test_payment_run_includes_selected_payables_even_when_due_date_is_in_future(): void
+    {
+        [$user, $tenant, $supplier] = $this->seedTenantContext();
+        $ap = $this->createPayable($tenant->id, $supplier->id, '10.0000');
+        $ap->update(['due_date' => now()->addDays(30)->toDateString()]);
+
+        $run = app(BuildSupplierPaymentRunService::class)->execute(
+            $tenant->id,
+            $user->id,
+            now()->toDateString(),
+            null,
+            null,
+            now()->toDateString(),
+            null,
+            [$ap->id],
+        );
+
+        $this->assertCount(1, $run->items);
+        $this->assertSame('10.0000', (string) $run->proposed_amount);
+    }
+
+    public function test_payment_run_due_date_filter_excludes_future_dated_payables_when_unselected(): void
+    {
+        [$user, $tenant, $supplier] = $this->seedTenantContext();
+        $ap = $this->createPayable($tenant->id, $supplier->id, '10.0000');
+        $ap->update(['due_date' => now()->addDays(30)->toDateString()]);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        app(BuildSupplierPaymentRunService::class)->execute(
+            $tenant->id,
+            $user->id,
+            now()->toDateString(),
+            null,
+            null,
+            now()->toDateString(),
+            null,
+            [],
+        );
+    }
+
+    public function test_draft_payment_run_can_be_deleted(): void
+    {
+        [$user, $tenant, $supplier] = $this->seedTenantContext();
+        $run = SupplierPaymentRun::query()->create([
+            'tenant_id' => $tenant->id,
+            'reference_code' => 'PR-DELETE-001',
+            'status' => SupplierPaymentRunStatus::Draft,
+            'scheduled_for' => now()->toDateString(),
+            'proposed_amount' => '0',
+            'approved_amount' => '0',
+            'executed_amount' => '0',
+            'created_by' => $user->id,
+        ]);
+
+        app(DeleteSupplierPaymentRunService::class)->execute($tenant->id, $run->id);
+
+        $this->assertDatabaseMissing('supplier_payment_runs', ['id' => $run->id]);
+    }
+
+    public function test_completed_payment_run_cannot_be_deleted(): void
+    {
+        [$user, $tenant, $supplier] = $this->seedTenantContext();
+        $ap = $this->createPayable($tenant->id, $supplier->id, '7.0000');
+
+        $run = app(BuildSupplierPaymentRunService::class)->execute(
+            $tenant->id,
+            $user->id,
+            now()->toDateString(),
+            null,
+            $supplier->id,
+            null,
+            null,
+            [$ap->id],
+        );
+
+        app(ApproveSupplierPaymentRunService::class)->execute($tenant->id, $run->id, $user->id);
+        app(ExecuteSupplierPaymentRunService::class)->execute($tenant->id, $run->id);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        app(DeleteSupplierPaymentRunService::class)->execute($tenant->id, $run->id);
+    }
+
+    public function test_payment_run_show_page_can_delete_draft_run(): void
+    {
+        [$user, $tenant] = $this->seedTenantContext();
+        $run = SupplierPaymentRun::query()->create([
+            'tenant_id' => $tenant->id,
+            'reference_code' => 'PR-DELETE-UI',
+            'status' => SupplierPaymentRunStatus::Draft,
+            'scheduled_for' => now()->toDateString(),
+            'proposed_amount' => '0',
+            'approved_amount' => '0',
+            'executed_amount' => '0',
+            'created_by' => $user->id,
+        ]);
+
+        Livewire::test('pages::accounting.payment-runs.show', ['id' => $run->id])
+            ->call('deleteRun')
+            ->assertRedirect(route('accounting.payment-runs.index'));
+
+        $this->assertDatabaseMissing('supplier_payment_runs', ['id' => $run->id]);
     }
 
     public function test_payment_run_pages_render_for_tenant_user(): void

@@ -1,10 +1,13 @@
 <?php
 
+use App\Domains\Crm\Services\SearchSuppliersService;
 use App\Domains\Procurement\Services\ListGoodsReceiptsForTenantService;
 use App\Domains\Procurement\Services\SummarizeGoodsReceiptRegisterService;
+use App\Livewire\Concerns\InteractsWithSearchableSelects;
 use App\Models\GoodsReceipt;
 use App\Models\Supplier;
 use App\Support\TenantMoney;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -15,10 +18,13 @@ use Livewire\WithPagination;
 new #[Layout('layouts::app', ['title' => 'Goods receipts'])]
 #[Title('Goods receipts')]
 class extends Component {
+    use InteractsWithSearchableSelects;
     use WithPagination;
 
     #[Url(as: 'supplier', history: true, except: '')]
     public string $supplierFilter = '';
+
+    public string $supplierFilterSearch = '';
 
     #[Url(as: 'status', history: true, except: '')]
     public string $statusFilter = '';
@@ -35,6 +41,16 @@ class extends Component {
     public function mount(): void
     {
         Gate::authorize('viewAny', GoodsReceipt::class);
+
+        if ($this->supplierFilter !== '') {
+            $supplier = Supplier::query()
+                ->where('tenant_id', (int) session('current_tenant_id'))
+                ->whereKey((int) $this->supplierFilter)
+                ->first(['name']);
+            if ($supplier !== null) {
+                $this->supplierFilterSearch = $supplier->name;
+            }
+        }
     }
 
     public function updatedSupplierFilter(): void
@@ -78,21 +94,19 @@ class extends Component {
 
     public function clearFilters(): void
     {
-        $this->reset('supplierFilter', 'statusFilter', 'receivedFrom', 'receivedTo', 'poSearch');
+        $this->reset('supplierFilter', 'supplierFilterSearch', 'statusFilter', 'receivedFrom', 'receivedTo', 'poSearch');
         $this->resetPage();
     }
 
-    /**
-     * @return \Illuminate\Database\Eloquent\Collection<int, Supplier>
-     */
-    public function getSuppliersProperty()
+    public function getSupplierFilterResultsProperty(): Collection
     {
         $tenantId = (int) session('current_tenant_id');
 
-        return Supplier::query()
-            ->where('tenant_id', $tenantId)
-            ->orderBy('name')
-            ->get(['id', 'name']);
+        return app(SearchSuppliersService::class)->execute(
+            $tenantId,
+            $this->supplierFilterSearch,
+            $this->supplierFilter !== '' ? (int) $this->supplierFilter : null,
+        );
     }
 
     public function getReceiptsProperty()
@@ -177,12 +191,18 @@ class extends Component {
                 <flux:button size="sm" variant="ghost" wire:click="clearFilters">{{ __('Clear filters') }}</flux:button>
             </div>
             <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                <flux:select wire:model.live="supplierFilter" :label="__('Supplier')">
-                    <option value="">{{ __('All suppliers') }}</option>
-                    @foreach ($this->suppliers as $s)
-                        <option value="{{ $s->id }}">{{ $s->name }}</option>
-                    @endforeach
-                </flux:select>
+                <x-searchable-select
+                    wire:model.live="supplierFilter"
+                    search-wire="supplierFilterSearch"
+                    value-property="supplierFilter"
+                    search-property="supplierFilterSearch"
+                    :label="__('Supplier')"
+                    :placeholder="__('Search suppliers…')"
+                    display-format="supplier"
+                    :results="$this->supplierFilterResults"
+                    :clearable="true"
+                    :empty-label="__('All suppliers')"
+                />
                 <flux:select wire:model.live="statusFilter" :label="__('Status')">
                     <option value="">{{ __('All statuses') }}</option>
                     <option value="{{ \App\Enums\GoodsReceiptStatus::Posted->value }}">{{ __('Posted') }}</option>

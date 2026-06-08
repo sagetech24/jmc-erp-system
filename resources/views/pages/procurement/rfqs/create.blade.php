@@ -1,12 +1,16 @@
 <?php
 
+use App\Domains\Crm\Services\SearchSuppliersService;
+use App\Domains\Inventory\Services\SearchProductsService;
 use App\Domains\Procurement\Services\CreateRfqService;
 use App\Enums\RfqLineUnitType;
 use App\Http\Requests\StoreRfqRequest;
+use App\Livewire\Concerns\InteractsWithSearchableSelects;
 use App\Models\Product;
 use App\Models\Rfq;
 use App\Models\Supplier;
 use Flux\Flux;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -16,11 +20,18 @@ new #[Layout('layouts::app', ['title' => 'Create Request For Quotation'])]
 #[Title('Create Request For Quotation')]
 class extends Component
 {
+    use InteractsWithSearchableSelects;
+
     public string $supplier_id = '';
+
+    public string $supplierSearch = '';
 
     public string $title = '';
 
     public string $notes = '';
+
+    /** @var array<int, string> */
+    public array $lineProductSearch = [];
 
     /** @var list<array{product_id: string, quantity: string, unit_type: string, unit_price: string, notes: string}> */
     public array $lines = [];
@@ -40,7 +51,14 @@ class extends Component
                 ->whereKey((int) $prefill)
                 ->exists();
             if ($exists) {
-                $this->supplier_id = (string) (int) $prefill;
+                $supplier = Supplier::query()
+                    ->where('tenant_id', $tenantId)
+                    ->whereKey((int) $prefill)
+                    ->first(['id', 'name']);
+                if ($supplier !== null) {
+                    $this->supplier_id = (string) $supplier->id;
+                    $this->supplierSearch = $supplier->name;
+                }
             }
         }
     }
@@ -77,12 +95,15 @@ class extends Component
         $this->redirect(route('procurement.rfqs.index', absolute: false), navigate: true);
     }
 
-    public function getSuppliersProperty()
+    public function getSupplierSearchResultsProperty(): Collection
     {
-        return Supplier::query()
-            ->where('tenant_id', (int) session('current_tenant_id'))
-            ->orderBy('name')
-            ->get();
+        $tenantId = (int) session('current_tenant_id');
+
+        return app(SearchSuppliersService::class)->execute(
+            $tenantId,
+            $this->supplierSearch,
+            $this->supplier_id !== '' ? (int) $this->supplier_id : null,
+        );
     }
 
     public function getSelectedSupplierProperty(): ?Supplier
@@ -91,15 +112,23 @@ class extends Component
             return null;
         }
 
-        return $this->suppliers->firstWhere('id', (int) $this->supplier_id);
+        return Supplier::query()
+            ->where('tenant_id', (int) session('current_tenant_id'))
+            ->whereKey((int) $this->supplier_id)
+            ->first(['id', 'name']);
     }
 
-    public function getProductsProperty()
+    public function productSearchResultsForLine(int $index): Collection
     {
-        return Product::query()
-            ->where('tenant_id', (int) session('current_tenant_id'))
-            ->orderBy('name')
-            ->get();
+        $tenantId = (int) session('current_tenant_id');
+        $term = $this->lineProductSearch[$index] ?? '';
+        $selectedId = $this->lines[$index]['product_id'] ?? '';
+
+        return app(SearchProductsService::class)->execute(
+            $tenantId,
+            $term,
+            $selectedId !== '' ? (int) $selectedId : null,
+        );
     }
 
     public function productLabelForLine(int $index): string
@@ -114,7 +143,10 @@ class extends Component
             return __('No product selected');
         }
 
-        $product = $this->products->firstWhere('id', (int) $pid);
+        $product = Product::query()
+            ->where('tenant_id', (int) session('current_tenant_id'))
+            ->whereKey((int) $pid)
+            ->first(['name']);
 
         return $product !== null ? $product->name : __('Unknown product');
     }
@@ -189,11 +221,17 @@ class extends Component
                     </div>
 
                     <div class="flex flex-col gap-6 px-6 py-6">
-                        <flux:select wire:model.live="supplier_id" :label="__('Supplier')" :placeholder="__('Choose…')" required>
-                            @foreach ($this->suppliers as $supplier)
-                                <flux:select.option :value="$supplier->id">{{ $supplier->name }}</flux:select.option>
-                            @endforeach
-                        </flux:select>
+                        <x-searchable-select
+                            wire:model="supplier_id"
+                            search-wire="supplierSearch"
+                            value-property="supplier_id"
+                            search-property="supplierSearch"
+                            :label="__('Supplier')"
+                            :placeholder="__('Search suppliers…')"
+                            display-format="supplier"
+                            :results="$this->supplierSearchResults"
+                            required
+                        />
 
                         <flux:input wire:model.live="title" :label="__('Title')" type="text" :placeholder="__('Optional short label')" />
 
@@ -213,11 +251,17 @@ class extends Component
                             @foreach ($lines as $index => $line)
                                 <div wire:key="rfq-line-{{ $index }}" class="grid gap-4 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-800 md:grid-cols-12 md:items-end">
                                     <div class="md:col-span-4">
-                                        <flux:select wire:model.live="lines.{{ $index }}.product_id" :label="__('Product')" :placeholder="__('Choose…')" required>
-                                            @foreach ($this->products as $product)
-                                                <flux:select.option :value="$product->id">{{ $product->name }} @if ($product->sku) ({{ $product->sku }}) @endif</flux:select.option>
-                                            @endforeach
-                                        </flux:select>
+                                        <x-searchable-select
+                                            wire:model="lines.{{ $index }}.product_id"
+                                            :search-wire="'lineProductSearch.'.$index"
+                                            :value-property="'lines.'.$index.'.product_id'"
+                                            :search-property="'lineProductSearch.'.$index"
+                                            :label="__('Product')"
+                                            :placeholder="__('Search products…')"
+                                            display-format="name_sku"
+                                            :results="$this->productSearchResultsForLine($index)"
+                                            required
+                                        />
                                     </div>
                                     <div class="md:col-span-1">
                                         <flux:input wire:model.live="lines.{{ $index }}.quantity" :label="__('Qty')" type="text" inputmode="decimal" required />

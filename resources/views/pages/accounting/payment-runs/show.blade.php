@@ -2,6 +2,7 @@
 
 use App\Domains\Accounting\Services\ApproveSupplierPaymentRunService;
 use App\Domains\Accounting\Services\CancelSupplierPaymentRunService;
+use App\Domains\Accounting\Services\DeleteSupplierPaymentRunService;
 use App\Domains\Accounting\Services\ExecuteSupplierPaymentRunService;
 use App\Enums\SupplierPaymentRunStatus;
 use App\Models\SupplierPaymentRun;
@@ -59,6 +60,22 @@ class extends Component {
         }
     }
 
+    public function deleteRun(DeleteSupplierPaymentRunService $service): void
+    {
+        Gate::authorize('delete', $this->run);
+
+        try {
+            $service->execute((int) session('current_tenant_id'), $this->id);
+        } catch (\InvalidArgumentException $e) {
+            Flux::toast(variant: 'danger', text: $e->getMessage());
+
+            return;
+        }
+
+        Flux::toast(variant: 'success', text: __('Payment run deleted.'));
+        $this->redirect(route('accounting.payment-runs.index', absolute: false), navigate: true);
+    }
+
     public function getRunProperty(): SupplierPaymentRun
     {
         return SupplierPaymentRun::query()
@@ -82,6 +99,15 @@ class extends Component {
     {
         return in_array($this->run->status, [SupplierPaymentRunStatus::Draft, SupplierPaymentRunStatus::Approved], true);
     }
+
+    public function canDelete(): bool
+    {
+        if (! in_array($this->run->status, [SupplierPaymentRunStatus::Draft, SupplierPaymentRunStatus::Approved, SupplierPaymentRunStatus::Cancelled], true)) {
+            return false;
+        }
+
+        return ! $this->run->items->contains(fn ($item) => $item->supplier_payment_id !== null);
+    }
 }; ?>
 
 <div class="flex w-full flex-1 flex-col gap-6">
@@ -100,6 +126,13 @@ class extends Component {
             @endif
             @if ($this->canCancel())
                 <flux:button wire:click="cancelRun" variant="danger">{{ __('Cancel') }}</flux:button>
+            @endif
+            @if ($this->canDelete())
+                <flux:button
+                    wire:click="deleteRun"
+                    wire:confirm="{{ __('Permanently delete this payment run? This cannot be undone.') }}"
+                    variant="danger"
+                >{{ __('Delete') }}</flux:button>
             @endif
         </div>
     </div>

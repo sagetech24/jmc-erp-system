@@ -27,6 +27,11 @@ class SupplierPaymentRunPolicy
         return $user->tenants()->whereKey($supplierPaymentRun->tenant_id)->exists();
     }
 
+    public function delete(User $user, SupplierPaymentRun $supplierPaymentRun): bool
+    {
+        return $user->tenants()->whereKey($supplierPaymentRun->tenant_id)->exists();
+    }
+
     private function onboardedToCurrentTenant(User $user): bool
     {
         $tenantId = session('current_tenant_id');
