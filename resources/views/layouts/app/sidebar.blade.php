@@ -15,33 +15,40 @@
                     <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>
                         {{ __('Dashboard') }}
                     </flux:sidebar.item>
-                    <flux:sidebar.item icon="archive-box" :href="route('products.index')" :current="request()->routeIs('products.*')" wire:navigate>
-                        {{ __('Products') }}
-                    </flux:sidebar.item>
                     <flux:sidebar.item icon="clipboard-document-list" :href="route('inventory.movements.index')" :current="request()->routeIs('inventory.*')" wire:navigate>
                         {{ __('Inventory') }}
                     </flux:sidebar.item>
                 {{-- </flux:sidebar.group> --}}
 
-                <flux:sidebar.group :heading="__('Procurement')" class="grid">
-                    <flux:sidebar.item icon="building-storefront" :href="route('suppliers.index')" :current="request()->routeIs('suppliers.*')" wire:navigate>
-                        {{ __('Suppliers') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="document-text" :href="route('procurement.rfqs.index')" :current="request()->routeIs('procurement.rfqs.*')" wire:navigate>
-                        {{ __('Request For Quotations') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="shopping-cart" :href="route('procurement.purchase-orders.index')" :current="request()->routeIs('procurement.purchase-orders.*')" wire:navigate>
-                        {{ __('Purchase Orders') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="arrow-down-tray" :href="route('procurement.goods-receipts.index')" :current="request()->routeIs('procurement.goods-receipts.*')" wire:navigate>
-                        {{ __('Receipts (Stock In)') }}
-                    </flux:sidebar.item>
-                </flux:sidebar.group>
+                <div class="flex flex-col in-data-flux-sidebar-collapsed-desktop:hidden" data-flux-sidebar-group>
+                    <div class="px-3 py-2">
+                        <a
+                            href="{{ route('procurement.index') }}"
+                            wire:navigate
+                            @class([
+                                'text-sm font-medium leading-none transition-colors',
+                                'text-zinc-800 dark:text-white' => request()->routeIs('procurement.index'),
+                                'text-zinc-400 hover:text-zinc-800 dark:hover:text-white' => ! request()->routeIs('procurement.index'),
+                            ])
+                        >
+                            {{ __('Procurement') }}
+                        </a>
+                    </div>
+
+                    <div class="flex flex-col">
+                        <flux:sidebar.item icon="document-text" :href="route('procurement.rfqs.index')" :current="request()->routeIs('procurement.rfqs.*')" wire:navigate>
+                            {{ __('Request For Quotations') }}
+                        </flux:sidebar.item>
+                        <flux:sidebar.item icon="shopping-cart" :href="route('procurement.purchase-orders.index')" :current="request()->routeIs('procurement.purchase-orders.*')" wire:navigate>
+                            {{ __('Purchase Orders') }}
+                        </flux:sidebar.item>
+                        <flux:sidebar.item icon="arrow-down-tray" :href="route('procurement.goods-receipts.index')" :current="request()->routeIs('procurement.goods-receipts.*')" wire:navigate>
+                            {{ __('Receipts (Stock In)') }}
+                        </flux:sidebar.item>
+                    </div>
+                </div>
 
                 <flux:sidebar.group :heading="__('Sales')" class="grid">
-                    <flux:sidebar.item icon="users" :href="route('customers.index')" :current="request()->routeIs('customers.*')" wire:navigate>
-                        {{ __('Customers') }}
-                    </flux:sidebar.item>
                     <flux:sidebar.item icon="clipboard-document-check" :href="route('sales.orders.index')" :current="request()->routeIs('sales.orders.*')" wire:navigate>
                         {{ __('Sales Orders') }}
                     </flux:sidebar.item>
@@ -62,6 +69,18 @@
                     </flux:sidebar.item>
                     <flux:sidebar.item icon="arrow-up-tray" :href="route('accounting.customer-payments.create')" :current="request()->routeIs('accounting.customer-payments.*')" wire:navigate>
                         {{ __('Customer Payments') }}
+                    </flux:sidebar.item>
+                </flux:sidebar.group>
+
+                <flux:sidebar.group :heading="__('Masterlists')" class="grid">
+                    <flux:sidebar.item icon="archive-box" :href="route('products.index')" :current="request()->routeIs('products.*')" wire:navigate>
+                        {{ __('Products') }}
+                    </flux:sidebar.item>
+                    <flux:sidebar.item icon="building-storefront" :href="route('suppliers.index')" :current="request()->routeIs('suppliers.*')" wire:navigate>
+                        {{ __('Suppliers') }}
+                    </flux:sidebar.item>
+                    <flux:sidebar.item icon="users" :href="route('customers.index')" :current="request()->routeIs('customers.*')" wire:navigate>
+                        {{ __('Customers') }}
                     </flux:sidebar.item>
                 </flux:sidebar.group>
             </flux:sidebar.nav>

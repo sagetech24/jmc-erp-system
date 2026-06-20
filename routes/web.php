@@ -18,6 +18,7 @@ Route::middleware(['auth', 'verified', 'tenant.context'])->group(function () {
 
     Route::livewire('suppliers', 'pages::suppliers.index')->name('suppliers.index');
     Route::livewire('suppliers/{id}', 'pages::suppliers.show')->name('suppliers.show');
+    Route::view('procurement', 'pages.procurement.index')->name('procurement.index');
     Route::livewire('procurement/rfqs', 'pages::procurement.rfqs.index')->name('procurement.rfqs.index');
     Route::livewire('procurement/rfqs/create', 'pages::procurement.rfqs.create')->name('procurement.rfqs.create');
     Route::livewire('procurement/rfqs/{id}/edit', 'pages::procurement.rfqs.edit')->name('procurement.rfqs.edit');
