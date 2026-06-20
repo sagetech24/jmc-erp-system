@@ -9,7 +9,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 });
 
 Route::middleware(['auth', 'verified', 'tenant.context'])->group(function () {
-    Route::view('dashboard', 'dashboard')->name('dashboard');
+    Route::livewire('dashboard', 'pages::dashboard')->name('dashboard');
 
     Route::livewire('products', 'pages::products.index')->name('products.index');
     Route::livewire('products/{id}', 'pages::products.show')->name('products.show');
