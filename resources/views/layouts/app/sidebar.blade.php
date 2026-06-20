@@ -82,6 +82,9 @@
                     <flux:sidebar.item icon="users" :href="route('customers.index')" :current="request()->routeIs('customers.*')" wire:navigate>
                         {{ __('Customers') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="building-library" :href="route('bank-accounts.index')" :current="request()->routeIs('bank-accounts.*')" wire:navigate>
+                        {{ __('Bank Accounts') }}
+                    </flux:sidebar.item>
                 </flux:sidebar.group>
             </flux:sidebar.nav>
 

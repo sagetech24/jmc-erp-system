@@ -31,6 +31,7 @@ Route::middleware(['auth', 'verified', 'tenant.context'])->group(function () {
     Route::livewire('procurement/goods-receipts/{id}', 'pages::procurement.goods-receipts.show')->name('procurement.goods-receipts.show');
 
     Route::livewire('customers', 'pages::customers.index')->name('customers.index');
+    Route::livewire('bank-accounts', 'pages::bank-accounts.index')->name('bank-accounts.index');
 
     Route::livewire('sales/orders/create', 'pages::sales.orders.create')->name('sales.orders.create');
     Route::livewire('sales/orders/{id}/ship', 'pages::sales.orders.ship')->name('sales.orders.ship');
